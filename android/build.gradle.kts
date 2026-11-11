@@ -22,3 +22,27 @@ subprojects {
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
+
+subprojects {
+    plugins.withId("com.android.library") {
+        if (name == "tflite_flutter") {
+            extensions.configure<com.android.build.gradle.LibraryExtension> {
+                compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+            }
+        }
+    }
+
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>()
+        .configureEach {
+            if (project.name == "tflite_flutter") {
+                compilerOptions {
+                    jvmTarget.set(
+                        org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+                    )
+                }
+            }
+        }
+}
