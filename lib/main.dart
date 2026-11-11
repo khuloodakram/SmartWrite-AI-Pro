@@ -19,38 +19,107 @@ class _SmartWriteAppState extends State<SmartWriteApp> {
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     title: 'SmartWrite AI Pro',
-    theme: ThemeData(useMaterial3: true, brightness: dark ? Brightness.dark : Brightness.light,
-      colorSchemeSeed: purple, scaffoldBackgroundColor: dark ? navy : const Color(0xFFF6F4FD),
-      fontFamily: 'Roboto'),
-    home: EditorPage(dark: dark, toggleTheme: () => setState(() => dark = !dark)),
+    theme: ThemeData(
+      useMaterial3: true,
+      brightness: dark ? Brightness.dark : Brightness.light,
+      colorSchemeSeed: purple,
+      scaffoldBackgroundColor: dark ? navy : const Color(0xFFF6F4FD),
+    ),
+    home: EditorPage(
+      dark: dark,
+      toggleTheme: () => setState(() => dark = !dark),
+    ),
   );
 }
 
-class Correction {
-  final String before, after, explanation;
-  const Correction(this.before, this.after, this.explanation);
+class CorrectionRule {
+  final String before, after, category, explanation;
+  const CorrectionRule(this.before, this.after, this.category, this.explanation);
 }
 
-// Explicitly rule-based offline demo, not a trained AI model.
-List<Correction> checkText(String text) {
-  const rules = <Correction>[
-    Correction('انشاء الله', 'إن شاء الله', 'تصحيح كتابة العبارة'),
-    Correction('ان شاء الله', 'إن شاء الله', 'تصحيح الهمزة'),
-    Correction('لاكن', 'لكن', 'تصحيح إملائي'),
-    Correction('هاذا', 'هذا', 'تصحيح إملائي'),
-    Correction('هاذه', 'هذه', 'تصحيح إملائي'),
-    Correction('مسؤليه', 'مسؤولية', 'تصحيح إملائي'),
-    Correction('الى', 'إلى', 'تصحيح الهمزة'),
-    Correction('الان', 'الآن', 'تصحيح الهمزة'),
-    Correction('definately', 'definitely', 'English spelling'),
-    Correction('recieve', 'receive', 'English spelling'),
-    Correction('teh', 'the', 'English spelling'),
-  ];
-  final found = <Correction>[];
-  for (final rule in rules) {
-    if (text.contains(rule.before)) found.add(rule);
+class TextIssue {
+  final int start, end;
+  final CorrectionRule rule;
+  const TextIssue(this.start, this.end, this.rule);
+}
+
+// Demonstration rules. This is NOT a trained AI model.
+const correctionRules = <CorrectionRule>[
+  CorrectionRule('انشاء الله', 'إن شاء الله', 'كتابة', 'تُكتب العبارة «إن شاء الله» من ثلاث كلمات.'),
+  CorrectionRule('ان شاء الله', 'إن شاء الله', 'همزات', 'تُكتب همزة «إن» تحت الألف.'),
+  CorrectionRule('لاكن', 'لكن', 'إملائي', 'الصواب «لكن» دون ألف بعد اللام.'),
+  CorrectionRule('هاذا', 'هذا', 'إملائي', 'اسم الإشارة الصحيح هو «هذا».'),
+  CorrectionRule('هاذه', 'هذه', 'إملائي', 'اسم الإشارة الصحيح هو «هذه».'),
+  CorrectionRule('مسؤليه', 'مسؤولية', 'إملائي', 'الصواب «مسؤولية».'),
+  CorrectionRule('الى', 'إلى', 'همزات', 'همزة «إلى» تحت الألف.'),
+  CorrectionRule('الان', 'الآن', 'همزات', 'الصواب «الآن».'),
+  CorrectionRule('definately', 'definitely', 'English spelling', 'The correct spelling is definitely.'),
+  CorrectionRule('recieve', 'receive', 'English spelling', 'The correct spelling is receive.'),
+  CorrectionRule('teh', 'the', 'English spelling', 'The letters are transposed.'),
+];
+
+bool _isWordCharacter(String char) {
+  if (char.isEmpty) return false;
+  return RegExp(r'[\p{L}\p{M}\p{N}_]', unicode: true).hasMatch(char);
+}
+
+List<TextIssue> findIssues(String text) {
+  final result = <TextIssue>[];
+  final covered = List<bool>.filled(text.length, false);
+  final ordered = [...correctionRules]..sort((a, b) => b.before.length.compareTo(a.before.length));
+  for (final rule in ordered) {
+    final regex = RegExp(RegExp.escape(rule.before), caseSensitive: false, unicode: true);
+    for (final match in regex.allMatches(text)) {
+      if (match.start > 0 && _isWordCharacter(text.substring(match.start - 1, match.start))) continue;
+      if (match.end < text.length && _isWordCharacter(text.substring(match.end, match.end + 1))) continue;
+      if (covered.getRange(match.start, match.end).any((x) => x)) continue;
+      for (var i = match.start; i < match.end; i++) { covered[i] = true; }
+      result.add(TextIssue(match.start, match.end, rule));
+    }
   }
-  return found;
+  result.sort((a, b) => a.start.compareTo(b.start));
+  return result;
+}
+
+/// Renders proofreading marks while keeping TextField fully editable.
+class ProofreadingController extends TextEditingController {
+  List<TextIssue> issues = [];
+  bool marked = false;
+  ProofreadingController() : super();
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    if (!marked || issues.isEmpty) return TextSpan(style: style, text: text);
+    final pieces = <TextSpan>[];
+    var position = 0;
+    for (final issue in issues) {
+      if (issue.end > text.length || issue.start < position) continue;
+      if (position < issue.start) pieces.add(TextSpan(text: text.substring(position, issue.start)));
+      pieces.add(TextSpan(
+        text: text.substring(issue.start, issue.end),
+        style: const TextStyle(
+          decoration: TextDecoration.underline,
+          decorationStyle: TextDecorationStyle.wavy,
+          decorationColor: Color(0xFFFF6B8B),
+          decorationThickness: 2,
+          backgroundColor: Color(0x335A2B58),
+        ),
+      ));
+      position = issue.end;
+    }
+    if (position < text.length) pieces.add(TextSpan(text: text.substring(position)));
+    return TextSpan(style: style, children: pieces);
+  }
+
+  void updateIssues(List<TextIssue> newIssues, {bool showMarks = true}) {
+    issues = newIssues;
+    marked = showMarks;
+    notifyListeners();
+  }
 }
 
 class EditorPage extends StatefulWidget {
@@ -62,89 +131,261 @@ class EditorPage extends StatefulWidget {
 }
 
 class _EditorPageState extends State<EditorPage> {
-  final controller = TextEditingController();
-  List<Correction> suggestions = [];
-  int tab = 0;
+  final controller = ProofreadingController();
   final history = <String>[];
+  List<TextIssue> suggestions = [];
+  int tab = 0;
+  bool checked = false;
+
   @override
-  void dispose() { controller.dispose(); super.dispose(); }
+  void initState() {
+    super.initState();
+    controller.addListener(_refresh);
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    controller.removeListener(_refresh);
+    controller.dispose();
+    super.dispose();
+  }
+
   void inspect() {
-    setState(() { suggestions = checkText(controller.text); tab = 0; });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(suggestions.isEmpty ? 'لم يجد الفحص المحلي أخطاء ضمن القواعد المتاحة' : 'تم العثور على ${suggestions.length} اقتراحات')));
-  }
-  void apply(Correction correction) {
+    final found = findIssues(controller.text);
     setState(() {
-      history.insert(0, controller.text);
-      controller.text = controller.text.replaceAll(correction.before, correction.after);
-      suggestions = checkText(controller.text);
+      checked = true;
+      suggestions = found;
+      tab = 0;
     });
+    controller.updateIssues(found);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(found.isEmpty
+          ? 'لم تُرصد أخطاء ضمن القواعد المحدودة؛ لا يعني ذلك خلو النص من الأخطاء'
+          : 'تم العثور على ${found.length} اقتراحات. اضغطي على كلمة محددة أو بطاقة التصحيح.'),
+    ));
   }
-  Widget pill(String text, IconData icon, VoidCallback onTap) => OutlinedButton.icon(
-    onPressed: onTap, icon: Icon(icon, size: 17), label: Text(text),
-    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12)),
+
+  void _onTextChanged(String _) {
+    if (!checked) return;
+    final latest = findIssues(controller.text);
+    suggestions = latest;
+    controller.updateIssues(latest);
+  }
+
+  void apply(TextIssue issue) {
+    final original = controller.text;
+    if (issue.start < 0 || issue.end > original.length) return;
+    final found = original.substring(issue.start, issue.end);
+    if (found.toLowerCase() != issue.rule.before.toLowerCase()) return;
+    history.insert(0, original);
+    if (history.length > 30) history.removeLast();
+    final updated = original.replaceRange(issue.start, issue.end, issue.rule.after);
+    controller.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: issue.start + issue.rule.after.length),
+    );
+    final refreshed = findIssues(updated);
+    suggestions = refreshed;
+    controller.updateIssues(refreshed);
+    setState(() {});
+  }
+
+  void restore(String previous) {
+    controller.value = TextEditingValue(
+      text: previous,
+      selection: TextSelection.collapsed(offset: previous.length),
+    );
+    final next = findIssues(previous);
+    suggestions = next;
+    checked = true;
+    controller.updateIssues(next);
+    setState(() => tab = 0);
+  }
+
+  void showSuggestion(TextIssue issue) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 6, 24, 26),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(issue.rule.category, style: const TextStyle(color: cyan, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            Text('${controller.text.substring(issue.start, issue.end)}  ←  ${issue.rule.after}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22)),
+            const SizedBox(height: 10),
+            Text(issue.rule.explanation),
+            const SizedBox(height: 18),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              onPressed: () { Navigator.pop(sheetContext); apply(issue); },
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('تطبيق التصحيح'),
+            )),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void inspectCursor() {
+    if (!checked || suggestions.isEmpty) return;
+    final selection = controller.selection;
+    if (!selection.isValid) return;
+    final offset = selection.extentOffset;
+    for (final issue in suggestions) {
+      if (offset >= issue.start && offset <= issue.end) {
+        FocusManager.instance.primaryFocus?.unfocus();
+        showSuggestion(issue);
+        return;
+      }
+    }
+  }
+
+  Widget pill(String label, IconData icon, int index) => OutlinedButton.icon(
+    onPressed: () => setState(() => tab = index),
+    icon: Icon(icon, size: 17), label: Text(label),
+    style: OutlinedButton.styleFrom(
+      backgroundColor: tab == index ? purple.withValues(alpha: .17) : null,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    ),
   );
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final surface = widget.dark ? const Color(0xFF1C1B38) : Colors.white;
+    final theme = Theme.of(context);
     final count = controller.text.trim().isEmpty ? 0 : controller.text.trim().split(RegExp(r'\s+')).length;
     return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
-      appBar: AppBar(backgroundColor: Colors.transparent, title: const Text('SmartWrite  AI Pro', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: .3)),
-        actions: [IconButton(tooltip: 'تبديل المظهر', onPressed: widget.toggleTheme, icon: Icon(widget.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined))]),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        title: const Text('SmartWrite AI Pro', style: TextStyle(fontWeight: FontWeight.w800)),
+        actions: [IconButton(
+          tooltip: 'تبديل المظهر',
+          onPressed: widget.toggleTheme,
+          icon: Icon(widget.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
+        )],
+      ),
       body: SafeArea(child: ListView(padding: const EdgeInsets.all(18), children: [
-        Container(padding: const EdgeInsets.all(19), decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [Color(0xFF6D3CE0), Color(0xFF253B94)]), borderRadius: BorderRadius.circular(24)),
-          child: Row(children: [const Icon(Icons.auto_awesome, size: 42, color: Colors.white), const SizedBox(width: 15),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [Color(0xFF6D3CE0), Color(0xFF253B94)]),
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: const Row(children: [
+            Icon(Icons.auto_awesome, color: Colors.white, size: 39),
+            SizedBox(width: 15),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('اكتب بثقة وإبداع', style: TextStyle(fontSize: 22, color: Colors.white, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 5), Text('محرر احترافي • فحص محلي أولي', style: TextStyle(color: Colors.white.withValues(alpha: .85)))
-            ]))])),
-        const SizedBox(height: 20),
-        Row(children: [const Text('مساحة الكتابة', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
-          const Spacer(), const Icon(Icons.lock_outline, size: 16, color: cyan), const SizedBox(width: 5), const Text('بدون إنترنت', style: TextStyle(fontSize: 12, color: cyan))]),
-        const SizedBox(height: 10),
-        Container(decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(22), border: Border.all(color: purple.withValues(alpha: .25))),
-          child: Column(children: [
-            TextField(controller: controller, minLines: 8, maxLines: 14, onChanged: (_) => setState(() {}),
-              textDirection: TextDirection.rtl, decoration: const InputDecoration(
-                hintText: 'ابدأ بكتابة نصك هنا...\nمثال: هاذا النص يحتاج الى تصحيح', border: InputBorder.none,
-                contentPadding: EdgeInsets.all(18))),
-            Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: Row(children: [
-              Text('$count كلمة  •  ${controller.text.length} حرف', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12)),
-              const Spacer(), IconButton(tooltip: 'نسخ النص', onPressed: () { Clipboard.setData(ClipboardData(text: controller.text)); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم نسخ النص'))); }, icon: const Icon(Icons.copy_outlined)),
-              IconButton(tooltip: 'مسح', onPressed: () => setState(() { controller.clear(); suggestions = []; }), icon: const Icon(Icons.delete_outline))
-            ]))
-          ])),
-        const SizedBox(height: 14),
-        SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: inspect,
-          style: FilledButton.styleFrom(backgroundColor: purple, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 17)),
-          icon: const Icon(Icons.auto_fix_high), label: const Text('فحص النص وعرض الاقتراحات', style: TextStyle(fontWeight: FontWeight.bold)))),
-        const SizedBox(height: 12),
-        Wrap(spacing: 8, runSpacing: 3, children: [
-          pill('اقتراحات', Icons.fact_check_outlined, () => setState(() => tab = 0)),
-          pill('السجل', Icons.history, () => setState(() => tab = 1)),
-          pill('الأدوات القادمة', Icons.auto_awesome_motion, () => setState(() => tab = 2)),
+              Text('اكتبي بثقة وإبداع', style: TextStyle(color: Colors.white, fontSize: 23, fontWeight: FontWeight.bold)),
+              SizedBox(height: 4),
+              Text('تصحيح تفاعلي • محرك قواعد محلي تجريبي', style: TextStyle(color: Colors.white70)),
+            ])),
+          ]),
+        ),
+        const SizedBox(height: 22),
+        Row(children: [
+          const Text('محرر النصوص', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const Spacer(), const Icon(Icons.lock_outline, size: 16, color: cyan),
+          const SizedBox(width: 5), const Text('يعمل بدون نت', style: TextStyle(color: cyan, fontSize: 12)),
         ]),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: surface, borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: purple.withValues(alpha: .4)),
+          ),
+          child: Column(children: [
+            TextField(
+              controller: controller,
+              minLines: 8, maxLines: 14,
+              onChanged: _onTextChanged,
+              onTap: inspectCursor,
+              textDirection: TextDirection.rtl,
+              decoration: const InputDecoration(
+                hintText: 'اكتبي نصك هنا...\nمثال: هاذا النص يحتاج الى تصحيح',
+                border: InputBorder.none, contentPadding: EdgeInsets.all(18),
+              ),
+            ),
+            Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: Row(children: [
+              Text('$count كلمة • ${controller.text.length} حرف',
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12)),
+              const Spacer(),
+              IconButton(tooltip: 'نسخ', onPressed: () {
+                Clipboard.setData(ClipboardData(text: controller.text));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم نسخ النص')));
+              }, icon: const Icon(Icons.copy_outlined)),
+              IconButton(tooltip: 'مسح', onPressed: () {
+                controller.clear();
+                suggestions = [];
+                checked = false;
+                controller.updateIssues([], showMarks: false);
+                setState(() {});
+              }, icon: const Icon(Icons.delete_outline)),
+            ])),
+          ]),
+        ),
+        const SizedBox(height: 9),
+        if (checked && suggestions.isNotEmpty)
+          Text('الكلمات المسطّرة بالأحمر تحمل اقتراحات. اضغطي عليها لعرض التفاصيل.',
+            style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
+        const SizedBox(height: 14),
+        SizedBox(width: double.infinity, child: FilledButton.icon(
+          onPressed: inspect,
+          style: FilledButton.styleFrom(backgroundColor: purple, foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 17)),
+          icon: const Icon(Icons.auto_fix_high),
+          label: const Text('فحص النص', style: TextStyle(fontWeight: FontWeight.bold)),
+        )),
+        const SizedBox(height: 16),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          pill('الاقتراحات', Icons.fact_check_outlined, 0),
+          pill('السجل المؤقت', Icons.history, 1),
+          pill('القادم', Icons.auto_awesome_motion, 2),
+        ]),
+        const SizedBox(height: 15),
         if (tab == 0) ...[
-          Text('الاقتراحات (${suggestions.length})', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          Text('الاقتراحات (${suggestions.length})',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
-          if (suggestions.isEmpty) Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(18)),
-            child: const Text('اضغط «فحص النص» لرؤية اقتراحات التصحيح المحلي. الفحص الحالي محدود بقواعد محددة.')),
-          for (final s in suggestions) Card(color: surface, margin: const EdgeInsets.only(bottom: 9), child: Padding(padding: const EdgeInsets.all(14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(s.explanation, style: const TextStyle(color: cyan, fontSize: 12)), const SizedBox(height: 8),
-              Text('${s.before}   ←   ${s.after}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-              Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => apply(s), icon: const Icon(Icons.check_circle_outline), label: const Text('تطبيق التصحيح')))
-            ])))
+          if (suggestions.isEmpty) Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(18)),
+            child: const Text('اضغطي «فحص النص» لرؤية اقتراحات القواعد المحدودة. لا يمثل هذا تدقيقًا لغويًا شاملًا.'),
+          ),
+          for (final issue in suggestions) Card(
+            color: surface,
+            margin: const EdgeInsets.only(bottom: 9),
+            child: ListTile(
+              contentPadding: const EdgeInsets.all(13),
+              title: Text('${controller.text.substring(issue.start, issue.end)}  ←  ${issue.rule.after}',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Padding(padding: const EdgeInsets.only(top: 6),
+                child: Text('${issue.rule.category} • ${issue.rule.explanation}')),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => showSuggestion(issue),
+            ),
+          ),
         ] else if (tab == 1) ...[
-          const Text('النسخ السابقة', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-          if (history.isEmpty) const Padding(padding: EdgeInsets.all(18), child: Text('لا توجد تعديلات بعد')),
-          for (final item in history) ListTile(title: Text(item, maxLines: 2, overflow: TextOverflow.ellipsis),
-            trailing: const Icon(Icons.restore), onTap: () => setState(() { controller.text = item; suggestions = checkText(item); tab = 0; }))
-        ] else Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(18)),
-          child: const Text('إعادة الصياغة، الترجمة، التلخيص والتصحيح السياقي ستُفعّل بعد دمج نموذج ذكاء اصطناعي محلي واختباره.')),
-        const SizedBox(height: 20), const Center(child: Text('SmartWrite AI Pro • UI v2 • Offline rules demo', style: TextStyle(fontSize: 11, color: Colors.grey))),
+          const Text('النسخ السابقة في هذه الجلسة', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          if (history.isEmpty) const Padding(padding: EdgeInsets.all(20), child: Text('لا توجد تصحيحات مطبقة بعد')),
+          for (final previous in history) ListTile(
+            title: Text(previous, maxLines: 2, overflow: TextOverflow.ellipsis),
+            trailing: const Icon(Icons.restore), onTap: () => restore(previous),
+          ),
+        ] else Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(18)),
+          child: const Text('إعادة الصياغة والترجمة والتلخيص تحتاج دمج نموذج ذكاء اصطناعي محلي واختباره لاحقًا.'),
+        ),
+        const SizedBox(height: 22),
+        const Center(child: Text('SmartWrite AI Pro • V3 offline proofreading prototype',
+          style: TextStyle(fontSize: 11, color: Colors.grey))),
       ])),
     ));
   }
