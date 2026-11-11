@@ -1,42 +1,47 @@
-
 name: Build SmartWrite AI Pro APK
-
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
-      - name: Check Flutter
-        run: flutter doctor -v
-
       - name: Get dependencies
         run: flutter pub get
-
-      - name: Build Android APK
-        run: flutter build apk --debug
-
+      - name: Check model assets
+        run: |
+          test -s assets/models/smartwrite_spell_v1.tflite
+          test -s assets/models/smartwrite_spell_metadata.json
+      - name: Analyze Flutter source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Build Android APK (full error log)
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build apk --debug --verbose 2>&1 | tee build-debug.log
+      - name: Upload diagnostic log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartWrite-Build-Diagnostics
+          path: build-debug.log
+          if-no-files-found: ignore
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: SmartWrite-AI-Pro-APK
