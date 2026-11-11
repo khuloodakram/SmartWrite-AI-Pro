@@ -40,7 +40,7 @@ subprojects {
             if (project.name == "tflite_flutter") {
                 compilerOptions {
                     jvmTarget.set(
-                        org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+                        org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8
                     )
                 }
             }
