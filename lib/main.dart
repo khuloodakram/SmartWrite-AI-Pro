@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 
 void main() => runApp(const SmartWriteApp());
 
@@ -130,17 +132,68 @@ class EditorPage extends StatefulWidget {
   State<EditorPage> createState() => _EditorPageState();
 }
 
-class _EditorPageState extends State<EditorPage> {
+class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   final controller = ProofreadingController();
   final history = <String>[];
   List<TextIssue> suggestions = [];
   int tab = 0;
   bool checked = false;
+  bool storageReady = false;
+  Timer? _saveTimer;
+
+  Future<void> _loadSavedState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedHistory = prefs.getStringList('smartwrite_history_v1') ?? <String>[];
+      final savedDraft = prefs.getString('smartwrite_draft_v1') ?? '';
+      if (!mounted) return;
+      setState(() {
+        if (history.isEmpty) history.addAll(savedHistory.take(30));
+        if (controller.text.isEmpty && savedDraft.isNotEmpty) {
+          controller.value = TextEditingValue(
+            text: savedDraft,
+            selection: TextSelection.collapsed(offset: savedDraft.length),
+          );
+        }
+        storageReady = true;
+      });
+    } catch (_) {
+      if (mounted) setState(() => storageReady = false);
+    }
+  }
+
+  Future<void> _saveNow() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('smartwrite_draft_v1', controller.text);
+      await prefs.setStringList('smartwrite_history_v1', history);
+      if (mounted && !storageReady) setState(() => storageReady = true);
+    } catch (_) {
+      if (mounted && storageReady) setState(() => storageReady = false);
+    }
+  }
+
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 600), _saveNow);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _saveTimer?.cancel();
+      _saveNow();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     controller.addListener(_refresh);
+    WidgetsBinding.instance.addObserver(this);
+    _loadSavedState();
   }
 
   void _refresh() {
@@ -149,6 +202,8 @@ class _EditorPageState extends State<EditorPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _saveTimer?.cancel();
     controller.removeListener(_refresh);
     controller.dispose();
     super.dispose();
@@ -170,6 +225,7 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   void _onTextChanged(String _) {
+    _scheduleSave();
     if (!checked) return;
     final latest = findIssues(controller.text);
     suggestions = latest;
@@ -183,6 +239,7 @@ class _EditorPageState extends State<EditorPage> {
     if (found.toLowerCase() != issue.rule.before.toLowerCase()) return;
     history.insert(0, original);
     if (history.length > 30) history.removeLast();
+    _saveTimer?.cancel();
     final updated = original.replaceRange(issue.start, issue.end, issue.rule.after);
     controller.value = TextEditingValue(
       text: updated,
@@ -191,6 +248,7 @@ class _EditorPageState extends State<EditorPage> {
     final refreshed = findIssues(updated);
     suggestions = refreshed;
     controller.updateIssues(refreshed);
+    _saveNow();
     setState(() {});
   }
 
@@ -203,6 +261,8 @@ class _EditorPageState extends State<EditorPage> {
     suggestions = next;
     checked = true;
     controller.updateIssues(next);
+    _saveTimer?.cancel();
+    _saveNow();
     setState(() => tab = 0);
   }
 
@@ -325,6 +385,8 @@ class _EditorPageState extends State<EditorPage> {
                 suggestions = [];
                 checked = false;
                 controller.updateIssues([], showMarks: false);
+                _saveTimer?.cancel();
+                _saveNow();
                 setState(() {});
               }, icon: const Icon(Icons.delete_outline)),
             ])),
@@ -345,7 +407,7 @@ class _EditorPageState extends State<EditorPage> {
         const SizedBox(height: 16),
         Wrap(spacing: 8, runSpacing: 4, children: [
           pill('الاقتراحات', Icons.fact_check_outlined, 0),
-          pill('السجل المؤقت', Icons.history, 1),
+          pill('السجل المحفوظ', Icons.history, 1),
           pill('القادم', Icons.auto_awesome_motion, 2),
         ]),
         const SizedBox(height: 15),
@@ -372,7 +434,7 @@ class _EditorPageState extends State<EditorPage> {
             ),
           ),
         ] else if (tab == 1) ...[
-          const Text('النسخ السابقة في هذه الجلسة', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text('النسخ السابقة المحفوظة على الهاتف', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           if (history.isEmpty) const Padding(padding: EdgeInsets.all(20), child: Text('لا توجد تصحيحات مطبقة بعد')),
           for (final previous in history) ListTile(
             title: Text(previous, maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -384,8 +446,12 @@ class _EditorPageState extends State<EditorPage> {
           child: const Text('إعادة الصياغة والترجمة والتلخيص تحتاج دمج نموذج ذكاء اصطناعي محلي واختباره لاحقًا.'),
         ),
         const SizedBox(height: 22),
-        const Center(child: Text('SmartWrite AI Pro • V3 offline proofreading prototype',
-          style: TextStyle(fontSize: 11, color: Colors.grey))),
+        Center(child: Text(
+          storageReady
+              ? 'SmartWrite AI Pro • V4 • حفظ محلي دون إنترنت'
+              : 'SmartWrite AI Pro • V4 • التخزين المحلي غير متاح',
+          style: const TextStyle(fontSize: 11, color: Colors.grey),
+        )),
       ])),
     ));
   }
