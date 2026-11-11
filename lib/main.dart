@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
+import 'services/neural_spell_service.dart';
 
 void main() => runApp(const SmartWriteApp());
 
@@ -139,6 +140,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   int tab = 0;
   bool checked = false;
   bool storageReady = false;
+  final NeuralSpellService neural = NeuralSpellService();
+  bool neuralReady = false;
+  String neuralStatus = 'جاري تحميل النموذج العصبي...';
   Timer? _saveTimer;
 
   Future<void> _loadSavedState() async {
@@ -194,6 +198,18 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     controller.addListener(_refresh);
     WidgetsBinding.instance.addObserver(this);
     _loadSavedState();
+    _loadNeuralModel();
+  }
+
+  Future<void> _loadNeuralModel() async {
+    await neural.load();
+    if (!mounted) return;
+    setState(() {
+      neuralReady = neural.isReady;
+      neuralStatus = neural.isReady
+          ? 'النموذج العصبي جاهز • دون إنترنت'
+          : 'تعذّر تحميل النموذج • التصحيح بالقواعد متاح';
+    });
   }
 
   void _refresh() {
@@ -204,13 +220,32 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
+    neural.dispose();
     controller.removeListener(_refresh);
     controller.dispose();
     super.dispose();
   }
 
   void inspect() {
-    final found = findIssues(controller.text);
+    final text = controller.text;
+    final found = findIssues(text);
+    // Run the on-device neural model; retain the existing rules as fallback.
+    if (neural.isReady) {
+      for (final suggestion in neural.suggest(text)) {
+        final overlaps = found.any((issue) =>
+            suggestion.start < issue.end && suggestion.end > issue.start);
+        if (overlaps) continue;
+        final original = text.substring(suggestion.start, suggestion.end);
+        final percent = (suggestion.confidence * 100).toStringAsFixed(0);
+        found.add(TextIssue(
+          suggestion.start,
+          suggestion.end,
+          CorrectionRule(original, suggestion.replacement, 'AI • إملائي',
+              'اقتراح من نموذج عصبي محلي، بثقة $percent٪. راجعي التصحيح قبل تطبيقه.'),
+        ));
+      }
+      found.sort((a, b) => a.start.compareTo(b.start));
+    }
     setState(() {
       checked = true;
       suggestions = found;
@@ -219,8 +254,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     controller.updateIssues(found);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(found.isEmpty
-          ? 'لم تُرصد أخطاء ضمن القواعد المحدودة؛ لا يعني ذلك خلو النص من الأخطاء'
-          : 'تم العثور على ${found.length} اقتراحات. اضغطي على كلمة محددة أو بطاقة التصحيح.'),
+          ? 'لا توجد اقتراحات ضمن نطاق القواعد والنموذج المحدود'
+          : 'تم العثور على ${found.length} اقتراحات (${neural.isReady ? 'AI + قواعد' : 'قواعد فقط'}).'),
     ));
   }
 
@@ -344,7 +379,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('اكتبي بثقة وإبداع', style: TextStyle(color: Colors.white, fontSize: 23, fontWeight: FontWeight.bold)),
               SizedBox(height: 4),
-              Text('تصحيح تفاعلي • محرك قواعد محلي تجريبي', style: TextStyle(color: Colors.white70)),
+              Text('تصحيح تفاعلي • نموذج CNN + قواعد محلية', style: TextStyle(color: Colors.white70)),
             ])),
           ]),
         ),
@@ -354,6 +389,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
           const Spacer(), const Icon(Icons.lock_outline, size: 16, color: cyan),
           const SizedBox(width: 5), const Text('يعمل بدون نت', style: TextStyle(color: cyan, fontSize: 12)),
         ]),
+        const SizedBox(height: 6),
+        Text(neuralStatus, style: TextStyle(fontSize: 12, color: neuralReady ? cyan : theme.colorScheme.onSurfaceVariant)),
         const SizedBox(height: 10),
         Container(
           decoration: BoxDecoration(
@@ -448,8 +485,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         const SizedBox(height: 22),
         Center(child: Text(
           storageReady
-              ? 'SmartWrite AI Pro • V4 • حفظ محلي دون إنترنت'
-              : 'SmartWrite AI Pro • V4 • التخزين المحلي غير متاح',
+              ? 'SmartWrite AI Pro • V5 • نموذج CNN محلي + حفظ'
+              : 'SmartWrite AI Pro • V5 • التخزين المحلي غير متاح',
           style: const TextStyle(fontSize: 11, color: Colors.grey),
         )),
       ])),
