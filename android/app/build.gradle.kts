@@ -48,9 +48,15 @@ flutter {
     source = "../.."
 }
 
+
 configurations.configureEach {
     exclude(
         group = "org.tensorflow",
         module = "tensorflow-lite-gpu"
     )
+    exclude(
+        group = "org.tensorflow",
+        module = "tensorflow-lite-api"
+    )
 }
+
