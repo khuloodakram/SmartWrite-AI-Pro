@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'neural_spell_service.dart';
+import 'text_analysis_service.dart';
 import 'app_shell.dart';
 
 
@@ -81,6 +82,18 @@ List<TextIssue> findIssues(String text) {
       for (var i = match.start; i < match.end; i++) { covered[i] = true; }
       result.add(TextIssue(match.start, match.end, rule));
     }
+  }
+  // Merge deterministic offline quality checks without overlapping existing rules.
+  for (final quality in const TextAnalysisService().analyze(text)) {
+    final overlaps = result.any((issue) =>
+        quality.start < issue.end && quality.end > issue.start);
+    if (overlaps) continue;
+    result.add(TextIssue(
+      quality.start,
+      quality.end,
+      CorrectionRule(quality.original, quality.replacement,
+          quality.category, quality.explanation),
+    ));
   }
   result.sort((a, b) => a.start.compareTo(b.start));
   return result;
@@ -237,6 +250,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
         final overlaps = found.any((issue) =>
             suggestion.start < issue.end && suggestion.end > issue.start);
         if (overlaps) continue;
+        if (suggestion.start < 0 || suggestion.end > text.length ||
+            suggestion.start >= suggestion.end) continue;
         final original = text.substring(suggestion.start, suggestion.end);
         final percent = (suggestion.confidence * 100).toStringAsFixed(0);
         found.add(TextIssue(
@@ -257,7 +272,7 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(found.isEmpty
           ? 'لا توجد اقتراحات ضمن نطاق القواعد والنموذج المحدود'
-          : 'تم العثور على ${found.length} اقتراحات (${neural.isReady ? 'AI + قواعد' : 'قواعد فقط'}).'),
+          : 'تم العثور على ${found.length} اقتراحات (تحليل نصوص + قواعد${neural.isReady ? ' + نموذج محلي' : ''}).'),
     ));
   }
 
@@ -271,7 +286,8 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
 
   void apply(TextIssue issue) {
     final original = controller.text;
-    if (issue.start < 0 || issue.end > original.length) return;
+    if (issue.start < 0 || issue.end > original.length ||
+        issue.start >= issue.end) return;
     final found = original.substring(issue.start, issue.end);
     if (found.toLowerCase() != issue.rule.before.toLowerCase()) return;
     history.insert(0, original);
@@ -336,7 +352,9 @@ class _EditorPageState extends State<EditorPage> with WidgetsBindingObserver {
     if (!selection.isValid) return;
     final offset = selection.extentOffset;
     for (final issue in suggestions) {
-      if (offset >= issue.start && offset <= issue.end) {
+      if (offset >= issue.start && offset <= issue.end &&
+          issue.end <= controller.text.length &&
+          controller.text.substring(issue.start, issue.end) == issue.rule.before) {
         FocusManager.instance.primaryFocus?.unfocus();
         showSuggestion(issue);
         return;
