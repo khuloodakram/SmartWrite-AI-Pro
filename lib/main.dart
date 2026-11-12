@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'neural_spell_service.dart';
+import 'app_shell.dart';
+
 
 void main() => runApp(const SmartWriteApp());
 
@@ -28,7 +30,7 @@ class _SmartWriteAppState extends State<SmartWriteApp> {
       colorSchemeSeed: purple,
       scaffoldBackgroundColor: dark ? navy : const Color(0xFFF6F4FD),
     ),
-    home: EditorPage(
+    home: SmartWriteShell(
       dark: dark,
       toggleTheme: () => setState(() => dark = !dark),
     ),
