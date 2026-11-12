@@ -28,9 +28,10 @@ subprojects {
 }
 
 
+
 subprojects {
-    afterEvaluate {
-        if (name == "tflite_flutter") {
+    if (name == "tflite_flutter") {
+        plugins.withId("com.android.library") {
             extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
                 compileSdk = 35
             }
