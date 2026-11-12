@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
-import 'services/neural_spell_service.dart';
+import 'neural_spell_service.dart';
 
 void main() => runApp(const SmartWriteApp());
 
