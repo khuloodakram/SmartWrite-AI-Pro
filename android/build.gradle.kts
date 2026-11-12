@@ -26,3 +26,14 @@ subprojects {
         }
     }
 }
+
+
+subprojects {
+    afterEvaluate {
+        if (name == "tflite_flutter") {
+            extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
+                compileSdk = 35
+            }
+        }
+    }
+}
