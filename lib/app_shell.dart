@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'main.dart';
+import 'documents_page.dart';
 
 /// Navigation shell for SmartWrite AI Pro.
 /// Existing EditorPage and offline CNN service remain unchanged.
@@ -15,19 +16,16 @@ class SmartWriteShell extends StatefulWidget {
 
 class _SmartWriteShellState extends State<SmartWriteShell> {
   int selected = 0;
-  late final Widget editor = EditorPage(
-    dark: widget.dark,
-    toggleTheme: widget.toggleTheme,
-  );
+  
 
   @override
   Widget build(BuildContext context) {
     const accent = Color(0xFF8657F6);
     final pages = <Widget>[
       _HomePage(openPage: (index) => setState(() => selected = index)),
-      editor,
+      EditorPage(dark: widget.dark, toggleTheme: widget.toggleTheme),
       const _ToolsPage(),
-      const _DocumentsPage(),
+      const DocumentsPage(),
       _SettingsPage(dark: widget.dark, toggleTheme: widget.toggleTheme),
     ];
     return Directionality(
