@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'main.dart';
+import 'writing_tools_service.dart';
+import 'package:flutter/services.dart';
 import 'documents_page.dart';
 
 /// Navigation shell for SmartWrite AI Pro.
@@ -76,23 +78,67 @@ class _ToolsPage extends StatefulWidget {
 
 class _ToolsPageState extends State<_ToolsPage> {
   final controller = TextEditingController();
+  WritingAnalysis? analysis;
+
   @override
   void dispose() { controller.dispose(); super.dispose(); }
+
   @override
   Widget build(BuildContext context) {
-    final value = controller.text.trim();
-    final words = value.isEmpty ? 0 : value.split(RegExp(r'\s+')).length;
     return _PageFrame(title: 'أدوات الكتابة', children: [
-      const Text('تحليل نص محلي', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      const Text('تحسين النص محليًا', style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 8),
+      const Text('تصحيح التكرار والمسافات وبعض علامات الترقيم دون اتصال بالإنترنت.'),
+      const SizedBox(height: 14),
+      TextField(
+        controller: controller,
+        minLines: 5,
+        maxLines: 12,
+        onChanged: (_) => setState(() => analysis = null),
+        decoration: const InputDecoration(
+          border: OutlineInputBorder(),
+          hintText: 'الصقي نصًا لتحليله وتحسينه',
+        ),
+      ),
       const SizedBox(height: 12),
-      TextField(controller: controller, minLines: 5, maxLines: 12,
-        onChanged: (_) => setState(() {}),
-        decoration: const InputDecoration(border: OutlineInputBorder(), hintText: 'الصقي نصًا لحساب الكلمات والحروف والجمل')),
-      const SizedBox(height: 16),
-      _FeatureTile(icon: Icons.text_fields, title: '$words كلمة', subtitle: '${value.runes.length} حرفًا (بما فيها المسافات)'),
-      _FeatureTile(icon: Icons.notes, title: '${value.isEmpty ? 0 : RegExp(r'[.!؟?]+').allMatches(value).length + (RegExp(r'[.!؟?]$').hasMatch(value) ? 0 : 1)} جملة تقريبًا', subtitle: 'إحصاء محلي لا يحتاج إنترنت'),
+      FilledButton.icon(
+        onPressed: controller.text.trim().isEmpty ? null : () => setState(() {
+          analysis = const WritingToolsService().analyze(controller.text);
+        }),
+        icon: const Icon(Icons.auto_fix_high),
+        label: const Text('تحليل وتحسين النص'),
+      ),
+      if (analysis != null) ...[
+        const SizedBox(height: 20),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          Chip(label: Text('${analysis!.words} كلمة')),
+          Chip(label: Text('${analysis!.characters} حرف')),
+          Chip(label: Text('${analysis!.sentences} جملة تقريبًا')),
+          Chip(label: Text('${analysis!.suggestions} تعديل')),
+        ]),
+        const SizedBox(height: 16),
+        const Text('النص الأصلي', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        SelectableText(analysis!.original),
+        const Divider(height: 32),
+        const Text('النص المحسّن', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        SelectableText(analysis!.improved),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: analysis!.improved));
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('تم نسخ النص المحسّن')),
+            );
+          },
+          icon: const Icon(Icons.copy_outlined),
+          label: const Text('نسخ النص المحسّن'),
+        ),
+      ],
       const SizedBox(height: 20),
-      const Text('إعادة الصياغة والتلخيص الذكي والتدقيق النحوي المتقدم ستُفعّل بعد دمج نماذج محلية واختبار نتائجها.', style: TextStyle(fontSize: 13)),
+      const Text('هذه تحسينات محدودة بالقواعد، وليست إعادة صياغة أو تلخيصًا باستخدام نموذج لغوي.', style: TextStyle(fontSize: 12)),
     ]);
   }
 }
